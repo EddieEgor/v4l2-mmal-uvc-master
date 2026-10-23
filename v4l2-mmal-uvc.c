@@ -791,7 +791,7 @@ struct uvc_format_info
 /* One format with one frame size, chosen on the command line; this must
  * describe the same thing uvc-setup.sh put into configfs. */
 static struct uvc_frame_info uvc_frames[2] = {
-  {1280, 720, {166666, 200000, 333333, 500000, 0}},
+  {1280, 720, {333333, 0}},       /* 30 fps only */
   {0, 0, {0}},
 };
 

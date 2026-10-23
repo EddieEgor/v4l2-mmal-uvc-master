@@ -30,12 +30,10 @@ ETH=ecm.usb0
 MAXPACKET=${MAXPACKET:-2048}
 ETHERNET=${ETHERNET:-1}
 
-# Frame intervals in 100ns units: 60, 50, 30, 20 fps. Keep in sync with
-# UVC_DEFAULT_INTERVAL in v4l2-mmal-uvc.c.
-INTERVALS="166666
-200000
-333333
-500000"
+# Frame intervals in 100ns units. Only 30 fps is offered, so the host
+# (e.g. the Windows Camera app) cannot pick a slower rate. Keep in sync with
+# uvc_frames[] and UVC_DEFAULT_INTERVAL in v4l2-mmal-uvc.c.
+INTERVALS="333333"
 DEFAULT_INTERVAL=333333
 
 die() { echo "Error: $*" >&2; exit 1; }
