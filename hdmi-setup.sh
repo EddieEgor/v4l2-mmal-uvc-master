@@ -40,7 +40,30 @@ else
 fi
 echo "TC358743 control node: $TARGET"
 
-v4l2-ctl -d "$TARGET" --set-edid=file="$EDID" --fix-edid-checksums || exit 1
+# Newer v4l2-ctl (Bookworm/Trixie) dropped --fix-edid-checksums, so fix the
+# checksum byte of every 128-byte EDID block here (works with mawk/gawk).
+FIXED=$(mktemp /tmp/edid.XXXXXX) || exit 1
+trap 'rm -f "$FIXED"' EXIT
+tr -cd '0-9a-fA-F' < "$EDID" | awk '
+function hv(c) { return index("0123456789abcdef", tolower(c)) - 1 }
+{ s = s $0 }
+END {
+	n = int(length(s) / 2)
+	if (n == 0 || n % 128) { print "bad EDID length " n > "/dev/stderr"; exit 1 }
+	for (i = 0; i < n; i++)
+		b[i] = hv(substr(s, 2*i+1, 1)) * 16 + hv(substr(s, 2*i+2, 1))
+	for (blk = 0; blk < n; blk += 128) {
+		sum = 0
+		for (i = blk; i < blk + 127; i++) sum += b[i]
+		b[blk + 127] = (256 - sum % 256) % 256
+	}
+	for (i = 0; i < n; i++) {
+		printf "%02x", b[i]
+		if (i % 16 == 15) printf "\n"
+	}
+}' > "$FIXED" || exit 1
+
+v4l2-ctl -d "$TARGET" --set-edid=file="$FIXED" || exit 1
 echo "EDID loaded; waiting for the source to lock..."
 
 i=0
