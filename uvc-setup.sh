@@ -25,6 +25,9 @@ PID="0xB722"
 SERIAL=""
 MANUF="SunplusIT Inc"
 PRODUCT="HD 720P Camera"
+# Name used for the interface strings (shown by Windows instead of the
+# kernel defaults "UVC Camera" / "Video Streaming").
+UVC_NAME=${UVC_NAME:-$PRODUCT}
 FUNC=uvc.0
 ETH=ecm.usb0
 MAXPACKET=${MAXPACKET:-2048}
@@ -64,10 +67,30 @@ create_frame() {
 	echo $(( WIDTH * HEIGHT * 160 )) > "$wdir/dwMaxBitRate"
 }
 
+# Replace the kernel's default interface strings with $UVC_NAME:
+#   function_name  VideoControl interface ("UVC Camera")
+#   iad_desc       Interface Association (Windows camera name)
+#   vs0/vs1_desc   VideoStreaming alt 0/1 ("Video Streaming")
+# Needs kernel 6.5+; older kernels keep the defaults.
+set_uvc_names() {
+	[ -e "$F/function_name" ] && echo "$UVC_NAME" > "$F/function_name"
+	S=$G/strings/0x409
+	for d in iad_desc vs0_desc vs1_desc; do
+		mkdir -p "$S/$d" 2>/dev/null && [ -e "$S/$d/s" ] || {
+			echo "  (custom $d not supported by this kernel, keeping default)"
+			rmdir "$S/$d" 2>/dev/null
+			continue
+		}
+		echo "$UVC_NAME" > "$S/$d/s"
+		ln -s "$S/$d" "$F/$d"
+	done
+}
+
 create_uvc() {
 	echo "  Creating UVC function $FUNC (${WIDTH}x${HEIGHT} $PLAT)"
 	F=$G/functions/$FUNC
 	mkdir -p "$F" || die "cannot create UVC function (is the usb_f_uvc module available?)"
+	set_uvc_names
 
 	case "$PLAT" in
 	mjpeg|test) create_frame mjpeg m 1 ;;
@@ -110,6 +133,10 @@ delete_uvc() {
 	[ -d "$F" ] || return
 	echo "  Removing UVC function $FUNC"
 	rm -f "$G/configs/c.1/$FUNC"
+	for d in iad_desc vs0_desc vs1_desc; do
+		rm -f "$F/$d"
+		rmdir "$G/strings/0x409/$d" 2>/dev/null
+	done
 	rm -f "$F"/control/class/*/h "$F"/streaming/class/*/h
 	rm -f "$F"/streaming/header/h/u "$F"/streaming/header/h/m
 	for d in "$F"/streaming/uncompressed/*/* "$F"/streaming/mjpeg/*/*; do
@@ -155,12 +182,12 @@ start)
 	echo 64 > "$G/bMaxPacketSize0"
 
 	mkdir -p "$G/strings/0x409"
-	echo "$SERIAL" > "$G/strings/0x409/serialnumber"
+	# echo "$SERIAL" > "$G/strings/0x409/serialnumber"
 	echo "$MANUF" > "$G/strings/0x409/manufacturer"
 	echo "$PRODUCT" > "$G/strings/0x409/product"
 
 	mkdir -p "$G/configs/c.1/strings/0x409"
-	echo "UVC" > "$G/configs/c.1/strings/0x409/configuration"
+	# echo "UVC" > "$G/configs/c.1/strings/0x409/configuration"
 	echo 500 > "$G/configs/c.1/MaxPower"
 
 	create_uvc
