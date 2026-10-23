@@ -11,7 +11,7 @@
 #   sudo ./uvc-setup.sh stop
 #
 # The WxH given here must match v4l2-mmal-uvc's -r option.
-# Environment overrides: MAXPACKET (default 2048), ETHERNET=0 to skip ECM.
+# Environment overrides: MAXPACKET (default 2048), ETHERNET=1 to add ECM (USB ethernet).
 
 OP=$1
 PLAT=$2
@@ -182,12 +182,12 @@ start)
 	echo 64 > "$G/bMaxPacketSize0"
 
 	mkdir -p "$G/strings/0x409"
-	# echo "$SERIAL" > "$G/strings/0x409/serialnumber"
+	echo "$SERIAL" > "$G/strings/0x409/serialnumber"
 	echo "$MANUF" > "$G/strings/0x409/manufacturer"
 	echo "$PRODUCT" > "$G/strings/0x409/product"
 
 	mkdir -p "$G/configs/c.1/strings/0x409"
-	# echo "UVC" > "$G/configs/c.1/strings/0x409/configuration"
+	echo "UVC" > "$G/configs/c.1/strings/0x409/configuration"
 	echo 500 > "$G/configs/c.1/MaxPower"
 
 	create_uvc

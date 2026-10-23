@@ -100,6 +100,16 @@ static int debug = 0;
 
 static volatile sig_atomic_t quit_requested;
 
+/* Exit status used when the HDMI signal is lost or changes, so a service
+ * manager (systemd Restart=always) restarts us and hdmi-setup.sh re-locks. */
+#define EXIT_HDMI_LOST 3
+static int exit_status;
+
+/* HDMI watchdog state: timings locked at start-up, last captured frame. */
+static unsigned int hdmi_w, hdmi_h;
+static int hdmi_fd = -1;         /* capture node used for DV queries */
+static struct timespec last_cap_ts;
+
 static int
 xioctl (int fd, unsigned long req, void *arg)
 {
@@ -771,6 +781,49 @@ hdmi_lock (int cap_fd, unsigned int *w, unsigned int *h, unsigned int *fps)
   }
 }
 
+/* Query (without applying) the current HDMI timings. 0 = signal present. */
+static int
+hdmi_query (int cap_fd, unsigned int *w, unsigned int *h)
+{
+  struct v4l2_dv_timings t;
+  char subdev[64];
+  int ret, sfd;
+
+  CLEAR (t);
+  ret = xioctl (cap_fd, VIDIOC_QUERY_DV_TIMINGS, &t) < 0 ? -errno : 0;
+  if ((ret == -ENOTTY || ret == -EINVAL) &&
+      find_subdev_containing ("tc358743", subdev, sizeof (subdev)) == 0) {
+    sfd = open (subdev, O_RDWR);
+    if (sfd >= 0) {
+      CLEAR (t);
+      ret = xioctl (sfd, VIDIOC_QUERY_DV_TIMINGS, &t) < 0 ? -errno : 0;
+      close (sfd);
+    }
+  }
+  if (ret == 0) {
+    *w = t.bt.width;
+    *h = t.bt.height;
+  }
+  return ret;
+}
+
+static double
+ts_elapsed (const struct timespec *since)
+{
+  struct timespec now;
+
+  clock_gettime (CLOCK_MONOTONIC, &now);
+  return (now.tv_sec - since->tv_sec) + (now.tv_nsec - since->tv_nsec) / 1e9;
+}
+
+static void
+hdmi_lost (const char *why)
+{
+  printf ("HDMI: %s; exiting so the service can re-lock the input\n", why);
+  exit_status = EXIT_HDMI_LOST;
+  quit_requested = 1;
+}
+
 /* ---------------------------------------------------------------------------
  * UVC gadget
  */
@@ -1310,8 +1363,11 @@ uvc_events_process (struct uvc_device *dev)
   case UVC_EVENT_STREAMON:
     printf ("UVC: host started streaming\n");
     if (pipeline_start () < 0) {
+      unsigned int w, h;
       err ("Failed to start the video pipeline\n");
       pipeline_stop ();
+      if (hdmi_w && (hdmi_query (hdmi_fd, &w, &h) < 0 || w != hdmi_w || h != hdmi_h))
+        hdmi_lost ("no usable signal when the host started streaming");
     }
     return;
 
@@ -1621,6 +1677,7 @@ pipeline_start (void)
   }
 
   pl.running = true;
+  clock_gettime (CLOCK_MONOTONIC, &last_cap_ts);
   printf ("Pipeline running\n");
   return 0;
 }
@@ -1717,6 +1774,7 @@ on_capture_ready (void)
 
   while (pl.running && vq_dqbuf (&pl.cap, &idx, &used, &flags, &ts) == 0) {
     pl.frames_in++;
+    clock_gettime (CLOCK_MONOTONIC, &last_cap_ts);
     if ((flags & V4L2_BUF_FLAG_ERROR) || idx >= pl.isp_out.count ||
         vq_qbuf (&pl.isp_out, idx, pl.isp_out_fmt.sizeimage, &ts) < 0)
       vq_qbuf (&pl.cap, idx, 0, NULL);     /* drop, recycle */
@@ -2025,6 +2083,9 @@ main (int argc, char *argv[])
   printf ("%-10s %s\n", "capture", v4l2_devname);
 
   hdmi_lock (pl.cap_fd, &dv_w, &dv_h, &fps);
+  hdmi_w = dv_w;                /* 0 = no DV timings: watchdog disabled */
+  hdmi_h = dv_h;
+  hdmi_fd = pl.cap_fd;
   if (!in_w || !in_h) {
     if (dv_w && dv_h) {
       in_w = dv_w;
@@ -2101,14 +2162,39 @@ main (int argc, char *argv[])
     }
 #undef WATCH
 
-    tv.tv_sec = 1;
-    tv.tv_usec = 0;
+    tv.tv_sec = 0;
+    tv.tv_usec = 500000;
     n = select (maxfd + 1, &rfds, &wfds, &efds, &tv);
     if (n < 0) {
       if (errno == EINTR)
         continue;
       err ("select: %s\n", strerror (errno));
       break;
+    }
+
+    /* HDMI watchdog: frames stopped while streaming, or the source went
+     * away / changed resolution (checked once a second, also when idle). */
+    if (hdmi_w) {
+      static struct timespec last_check;
+      unsigned int w, h;
+
+      if (pl.running && ts_elapsed (&last_cap_ts) > 2.0) {
+        hdmi_lost ("no frames captured for 2 s");
+        continue;
+      }
+      if (ts_elapsed (&last_check) >= 1.0) {
+        clock_gettime (CLOCK_MONOTONIC, &last_check);
+        if (hdmi_query (pl.cap_fd, &w, &h) < 0) {
+          hdmi_lost ("signal lost");
+          continue;
+        }
+        if (w != hdmi_w || h != hdmi_h) {
+          char why[64];
+          snprintf (why, sizeof why, "resolution changed to %ux%u", w, h);
+          hdmi_lost (why);
+          continue;
+        }
+      }
     }
     if (n == 0)
       continue;
@@ -2133,7 +2219,7 @@ main (int argc, char *argv[])
         on_jpeg_output_ready ();
     }
   }
-  ret = 0;
+  ret = exit_status;
   printf ("Exiting\n");
 
 cleanup:

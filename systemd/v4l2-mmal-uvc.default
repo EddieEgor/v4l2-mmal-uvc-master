@@ -1,0 +1,13 @@
+# Settings for uvc-gadget.service and v4l2-mmal-uvc.service.
+# After editing:  sudo systemctl restart uvc-gadget v4l2-mmal-uvc
+
+# Gadget format/size (uvc-setup.sh start <format> <size>): mjpeg or yuyv.
+UVC_FORMAT=mjpeg
+UVC_SIZE=1280x720
+
+# Name shown by Windows for the camera (defaults to the product string).
+#UVC_NAME="HD 720P Camera"
+
+# v4l2-mmal-uvc options (see ./v4l2-mmal-uvc -h). Must match the format above:
+# -f1 = MJPEG, -f0 = YUYV; -r1 = 1280x720.
+CAMERA_ARGS=-v /dev/video0 -zUYVY -n3 -r1 -f1 -q80

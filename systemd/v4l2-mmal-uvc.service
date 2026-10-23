@@ -1,0 +1,24 @@
+[Unit]
+Description=HDMI to USB webcam (v4l2-mmal-uvc)
+BindsTo=uvc-gadget.service
+After=uvc-gadget.service
+# Keep retrying forever (e.g. while no HDMI source is connected).
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+EnvironmentFile=-/etc/default/v4l2-mmal-uvc
+WorkingDirectory=@DIR@
+# Load the EDID and lock to the HDMI signal; fails (and is retried) if
+# there is no source yet.
+ExecStartPre=@DIR@/hdmi-setup.sh
+# Exits with status 3 when the HDMI signal is lost or changes resolution;
+# the webcam then disappears from the PC until the source is back.
+ExecStart=@DIR@/v4l2-mmal-uvc $CAMERA_ARGS
+Restart=always
+RestartSec=2
+# Video work should not be starved by other tasks.
+Nice=-10
+
+[Install]
+WantedBy=multi-user.target

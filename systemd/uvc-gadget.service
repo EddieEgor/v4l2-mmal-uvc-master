@@ -1,0 +1,16 @@
+[Unit]
+Description=USB UVC webcam gadget (configfs)
+After=local-fs.target systemd-modules-load.service
+Before=v4l2-mmal-uvc.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+EnvironmentFile=-/etc/default/v4l2-mmal-uvc
+# Clear a gadget left over from a crash, then create it.
+ExecStartPre=-@DIR@/uvc-setup.sh stop
+ExecStart=@DIR@/uvc-setup.sh start ${UVC_FORMAT} ${UVC_SIZE}
+ExecStop=@DIR@/uvc-setup.sh stop
+
+[Install]
+WantedBy=multi-user.target
