@@ -1981,7 +1981,7 @@ main (int argc, char *argv[])
   udev->brightness_val = PU_BRIGHTNESS_DEFAULT_VAL;
   switch (speed) {
   case USB_SPEED_FULL:  udev->maxpkt = 1023; break;
-  case USB_SPEED_HIGH:  udev->maxpkt = 3072; break;
+  case USB_SPEED_HIGH:  udev->maxpkt = 2048; break;
   default:              udev->maxpkt = 1024; break;
   }
 

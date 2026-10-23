@@ -27,7 +27,7 @@ MANUF=$(hostname)
 PRODUCT="pizero"
 FUNC=uvc.0
 ETH=ecm.usb0
-MAXPACKET=${MAXPACKET:-3072}
+MAXPACKET=${MAXPACKET:-2048}
 ETHERNET=${ETHERNET:-1}
 
 # Frame intervals in 100ns units: 60, 50, 30, 20 fps. Keep in sync with
