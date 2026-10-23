@@ -883,6 +883,27 @@ uvc_video_set_format (struct uvc_device *dev)
   return 0;
 }
 
+/*
+ * Tell the gadget driver the committed frame interval. Newer kernels
+ * (6.8+) size each isochronous request so that one frame is spread over
+ * this interval, and default to 666666 (15 fps) if it is never set.
+ */
+static void
+uvc_video_set_interval (struct uvc_device *dev, unsigned int interval)
+{
+  struct v4l2_streamparm parm;
+
+  CLEAR (parm);
+  parm.type = V4L2_BUF_TYPE_VIDEO_OUTPUT;
+  parm.parm.output.timeperframe.numerator = interval;
+  parm.parm.output.timeperframe.denominator = 10000000;
+  if (xioctl (dev->fd, VIDIOC_S_PARM, &parm) < 0)
+    err ("UVC: unable to set frame interval %u: %s\n", interval, strerror (errno));
+  else
+    printf ("UVC: gadget frame interval set to %u (%.1f fps)\n", interval,
+            10000000.0 / interval);
+}
+
 static void
 uvc_fill_streaming_control (struct uvc_device *dev,
                             struct uvc_streaming_control *ctrl,
@@ -1242,6 +1263,7 @@ uvc_events_process_data (struct uvc_device *dev, struct uvc_request_data *data)
     dev->fcc = format->fcc;
     dev->width = frame->width;
     dev->height = frame->height;
+    uvc_video_set_interval (dev, *interval);
     return uvc_video_set_format (dev);
   }
   return 0;
