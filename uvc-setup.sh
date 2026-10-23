@@ -155,7 +155,7 @@ start)
 	echo 64 > "$G/bMaxPacketSize0"
 
 	mkdir -p "$G/strings/0x409"
-	# echo "$SERIAL" > "$G/strings/0x409/serialnumber"
+	echo "$SERIAL" > "$G/strings/0x409/serialnumber"
 	echo "$MANUF" > "$G/strings/0x409/manufacturer"
 	echo "$PRODUCT" > "$G/strings/0x409/product"
 
