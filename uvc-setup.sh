@@ -20,15 +20,15 @@ SIZE=${3:-1280x720}
 CONFIGFS="/sys/kernel/config"
 GADGET="$CONFIGFS/usb_gadget"
 G="$GADGET/pizero"
-VID="0x1d6b"
-PID="0x0104"
-SERIAL="0123456789"
-MANUF=$(hostname)
-PRODUCT="pizero"
+VID="0x04F2"
+PID="0xB722"
+SERIAL=""
+MANUF="SunplusIT Inc"
+PRODUCT="HD 720P Camera"
 FUNC=uvc.0
 ETH=ecm.usb0
 MAXPACKET=${MAXPACKET:-2048}
-ETHERNET=${ETHERNET:-1}
+ETHERNET=${ETHERNET:-0}
 
 # Frame intervals in 100ns units. Only 30 fps is offered, so the host
 # (e.g. the Windows Camera app) cannot pick a slower rate. Keep in sync with
@@ -146,7 +146,7 @@ start)
 	mkdir -p "$G" || die "cannot create $G"
 	echo $VID > "$G/idVendor"
 	echo $PID > "$G/idProduct"
-	echo 0x0100 > "$G/bcdDevice"
+	echo 0x1228 > "$G/bcdDevice"
 	echo 0x0200 > "$G/bcdUSB"
 	# Miscellaneous / Interface Association Descriptor (needed for composite UVC)
 	echo 0xEF > "$G/bDeviceClass"
@@ -155,7 +155,7 @@ start)
 	echo 64 > "$G/bMaxPacketSize0"
 
 	mkdir -p "$G/strings/0x409"
-	echo "$SERIAL" > "$G/strings/0x409/serialnumber"
+	# echo "$SERIAL" > "$G/strings/0x409/serialnumber"
 	echo "$MANUF" > "$G/strings/0x409/manufacturer"
 	echo "$PRODUCT" > "$G/strings/0x409/product"
 
