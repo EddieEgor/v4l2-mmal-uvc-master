@@ -14,20 +14,25 @@ UNITS="uvc-gadget.service v4l2-mmal-uvc.service"
 [ "$(id -u)" -eq 0 ] || { echo "run as root: sudo sh $0"; exit 1; }
 
 case "$1" in
-readonly)
+""|install) ;;
+readonly|read-only|ro)
 	command -v raspi-config >/dev/null || { echo "raspi-config not found"; exit 1; }
 	raspi-config nonint do_overlayfs 0
 	echo "Read-only root (overlay) enabled. Reboot to apply: sudo reboot"
 	echo "Changes made after that are lost at power-off; use 'readwrite' to edit."
 	exit 0 ;;
-readwrite)
+readwrite|read-write|rw)
 	command -v raspi-config >/dev/null || { echo "raspi-config not found"; exit 1; }
 	raspi-config nonint do_overlayfs 1
 	echo "Read-only root disabled. Reboot to apply: sudo reboot"
 	exit 0 ;;
+uninstall|remove) ;;
+*)
+	echo "Usage: sudo sh $0 [install|uninstall|readonly|readwrite]"
+	exit 1 ;;
 esac
 
-if [ "$1" = "uninstall" ]; then
+if [ "$1" = "uninstall" ] || [ "$1" = "remove" ]; then
 	systemctl disable --now v4l2-mmal-uvc.service uvc-gadget.service 2>/dev/null || :
 	for u in $UNITS; do rm -f "/etc/systemd/system/$u"; done
 	systemctl daemon-reload
@@ -50,9 +55,22 @@ done
 	sed 's/\r$//' "$DIR/systemd/v4l2-mmal-uvc.default" > /etc/default/v4l2-mmal-uvc
 
 # Stop anything started by hand before the services take over.
-pkill -x v4l2-mmal-uvc 2>/dev/null || :
+systemctl stop v4l2-mmal-uvc.service uvc-gadget.service 2>/dev/null || :
+if pkill -x v4l2-mmal-uvc 2>/dev/null; then
+	i=0
+	while pgrep -x v4l2-mmal-uvc >/dev/null && [ $i -lt 10 ]; do
+		sleep 0.5; i=$((i + 1))
+	done
+	pkill -9 -x v4l2-mmal-uvc 2>/dev/null || :
+fi
 systemctl daemon-reload
-systemctl enable --now uvc-gadget.service v4l2-mmal-uvc.service
+systemctl enable uvc-gadget.service v4l2-mmal-uvc.service
+if ! systemctl start uvc-gadget.service v4l2-mmal-uvc.service; then
+	echo
+	echo "Start failed. Gadget log:"
+	journalctl -u uvc-gadget.service -b --no-pager | tail -n 20
+	exit 1
+fi
 echo
 systemctl --no-pager status v4l2-mmal-uvc.service | head -n 12
 echo
