@@ -1,0 +1,186 @@
+
+TC35874 to UVC gadget application README
+by Kin Wei Lee September 2020
+Updated for Raspberry Pi OS Bookworm / Trixie
+
+
+Original Work
+=============
+UVC original work by
+Laurent Pinchart ideasonboard.com
+and patches by Bhupesh Sharma
+but conveniently collated by jdonald (github.com/jdonald/uvc-gadget)
+V4L2 MMAL original work by
+6by9 github.com/6by9/v4l2_mmal
+
+Overview
+=========
+This software uses a Raspberry Pi Zero and a TC35874 bridge to convert an HDMI
+source signal and output the video over USB so that it can be used as a USB
+webcam.
+
+The TC35874 outputs UYVY or RGB24 data to the CSI-2 camera port and is
+incompatible with UVC gadget, which requires either YUYV or MJPEG formatted
+data. The Pi's VideoCore hardware converts and scales the image (ISP) and,
+for MJPEG, compresses it (JPEG encoder).
+
+What changed for Bookworm / Trixie
+===================================
+Earlier versions used MMAL and the /opt/vc userland libraries (libmmal,
+libvcos, libbcm_host, libvcsm). Raspberry Pi removed those after Buster, which
+is why the program stopped working on Bullseye and later.
+
+This version drives the same hardware through the kernel's V4L2 mem2mem
+driver (bcm2835-codec) instead, and shares buffers between devices as
+dmabufs from the CMA dma-heap:
+
+  -f0 YUYV : unicam -> ISP (/dev/video12) -> UVC
+  -f1 MJPEG: unicam -> ISP (/dev/video12) -> JPEG encoder (/dev/video31) -> UVC
+
+No extra libraries are needed. It builds on 32-bit and 64-bit Pi OS.
+
+Other changes:
+ - Devices are auto-detected (UVC gadget, ISP, JPEG encoder); -u/-i/-j override.
+ - Capture size defaults to the detected HDMI timings (-g still works).
+ - -b (bitrate) is ignored. Use -q 1..100 (JPEG quality, default 80).
+ - -r accepts 0/1/2 or WxH. It must match the size given to uvc-setup.sh.
+ - Stopping and restarting a stream from the host now works without
+   restarting the program. Ctrl-C exits cleanly.
+ - uvc-setup.sh adds the descriptors that 6.x kernels require. It also takes
+   an optional size, and 'stop' removes the gadget properly.
+ - New hdmi-setup.sh does the EDID / DV-timings steps. On kernels where unicam
+   is media-controller based, it also configures the media graph.
+
+Prequisites
+===========
+Raspberry Pi Zero, Zero W or Zero 2 W (other boards with VideoCore IV should
+also work; the Pi 5 does NOT, as it has no bcm2835-codec)
+TC358743 based converter board
+Raspberry Pi OS (Lite or Desktop) Bookworm or Trixie, 32- or 64-bit
+
+  sudo apt install build-essential v4l-utils
+  make
+
+Setup
+======
+1. Edit /boot/firmware/config.txt (it is no longer /boot/config.txt):
+
+     camera_auto_detect=0
+     dtoverlay=tc358743,i2c_pins_28_29=1
+     dtoverlay=dwc2,dr_mode=peripheral
+
+   1080p UYVY buffers need about 40MB of CMA. If you get dma-heap allocation
+   errors, raise it on the existing vc4-kms-v3d line, e.g.
+
+     dtoverlay=vc4-kms-v3d,cma-128
+
+   (Add i2c_pins_28_29=1 only if your board uses those pins, as the
+   H2C-RPI0-B01 does on the Pi Zero.) raspi-config no longer needs 'Camera'
+   enabled. Remove any old 'modules-load=dwc2,libcomposite' or 'cma=' from
+   /boot/firmware/cmdline.txt; they are no longer needed. Reboot.
+
+2. Make sure your user is in the 'video' group (default user already is).
+
+3. Create the USB gadget (format and size must match step 5):
+     sudo ./uvc-setup.sh start mjpeg 1280x720
+   or
+     sudo ./uvc-setup.sh start yuyv 1280x720
+
+4. Set up the TC358743 (EDID + timings):
+     ./hdmi-setup.sh                 # uses 1080P50EDID.txt
+   This replaces the manual v4l2-ctl --set-edid / --set-dv-bt-timings steps.
+
+5. Run
+     ./v4l2-mmal-uvc -v /dev/video0 -f1 -r1      # MJPEG 1280x720
+     ./v4l2-mmal-uvc -v /dev/video0 -f0 -r1      # YUYV  1280x720
+   Add -d for debug output, -h for all options.
+
+ConfigFS can be unloaded using
+     sudo ./uvc-setup.sh stop
+
+Troubleshooting
+===============
+"No UVC gadget video device found"
+    Run uvc-setup.sh first. Check 'ls /sys/class/udc' lists a controller. If
+    not, the dwc2 overlay is missing.
+"ENOLINK" / "No HDMI signal"
+    Run hdmi-setup.sh. Check the source is on and outputs a mode in the EDID.
+"STREAMON failed with EPIPE"
+    Media-controller kernel and the formats in the graph do not match. Run
+    hdmi-setup.sh again with the same pixel format: UYVY8_1X16 for -zUYVY,
+    RGB888_1X24 for -zRGB24/-zBGR24. 'media-ctl -p' shows the graph.
+"dma-heap allocation ... failed"
+    Increase CMA (see step 1).
+Colours swapped with RGB input
+    Use -zBGR24 instead of -zRGB24 (or the other way round).
+
+Resolution
+==========
+The output resolution defaults to 1280x720 (-r1). Expect about 30fps with
+MJPEG, or about 8.8fps with YUYV RAW (limited by USB isochronous bandwidth,
+see below).
+
+NOTES
+======
+
+Audio is NOT handled.
+
+This software originally spliced the V4L2 mmal part of v4l2-mmal by 6by9 with
+the UVC part of uvc-gadget by Laurent Pinchart. The UVC part is unchanged. The
+MMAL part has been replaced by V4L2 mem2mem.
+
+Capture, ISP and JPEG buffers are dmabufs shared between the devices (zero
+copy). The only CPU copy is the finished frame into the UVC gadget's buffer
+(V4L2_MEMORY_MMAP).
+
+Internally the code will select UYVY output from TC35874 (RGB24 can be used
+too with -zRGB24).
+
+Interlaced sources: use -F interlaced (and an RGB24 source, -zRGB24), as
+previously needed for the EOS M.
+
+ISOCH USB transfers work.
+BULK mode transfer does not work (f_uvc has no bulk support).
+
+Framerate:
+In YUYV mode the max framerate is about 8.8fps. It is limited by the
+microframe period and the streaming_maxpacket size for the gadget.
+microframe period = 125us (ISOCH transfer)
+image size = 1280*720*2
+streaming_maxpacket = 2048
+framerate = 1/(1280*720*2/2048*125e-6) = 8.8fps
+You can try MAXPACKET=3072 sudo -E ./uvc-setup.sh start yuyv (newer dwc2
+drivers may cope).
+
+ConfigFS is used to setup the UVC USB gadget.
+
+The software may or may not work for you and it may kill your hardware. My first
+PiZero's USB OTG functionality died during development. Essentially it no longer
+works in gadget mode. The cause could have come from power coming from two
+different sources into the Pi Zero.
+
+Test Setup (original, Buster)
+==============================
+Hardware
+-H2C-RPI0-B01 HDMI to CSI-2 Bridge using TC358743 (same foot print as Pi Zero)
+-Pi Zero W (4.19.122+ recompiled from source using rpi-4.19.y branch)
+-Pi Zero 2 W using stock Raspberry Pi OS Lite (Legacy)
+
+Input HDMI sources:
+-PC 1280x720 and 1920x1080 ok
+-EOS M - 720x480 interlaced signal needs interlace mode (-F interlaced) and
+the source must be RGB24. (use Magic Lantern for clean HDMI!)
+-EOS M5 - 1920x1080 signal ok
+
+Software on MacBook Pro (Retina, 13-inch, Late 2013)
+-Facetime (Cataline 10.15.5) working (!)
+-QuickTime Player working
+-VLC (macOS 3.0.11.1) - selecting webcam gadget fails on first try and reverts
+to the internal webcam, on second select webcam gadget -> facetime camera ->
+webcam gadget to get it working. VLC however has a large latency.
+
+Windows 10
+- Skype working use UVC Camera as input and MJPEG mode, YUYV didn't work
+- VLC doesn't work error 'Your input couldn't be opened'
+
+The original MMAL sources are kept in legacy-mmal/ for reference.
